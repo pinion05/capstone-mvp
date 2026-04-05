@@ -161,6 +161,13 @@ export default function NodeMapView({ nodes, edges, onBack }: NodeMapViewProps) 
                 ctx.fillStyle = "#18181b";
                 ctx.fillText(label, node.x - tagWidth / 2, node.y + size + tagFontSize + 2 / globalScale);
               }}
+              nodePointerAreaPaint={(node: any, color: string, ctx: any) => {
+                const size = (IMPORTANCE_SIZE[node.importance] || 10) + 4;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+              }}
               linkLabel="label"
               linkDirectionalArrowLength={4}
               linkDirectionalArrowRelPos={0.8}
