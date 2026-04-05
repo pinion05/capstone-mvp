@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const API_URL = process.env.LLM_BASE_URL || "https://api.z.ai/api/coding/paas/v4";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -14,12 +14,12 @@ interface ChatRequest {
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
+  const apiKey = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL || "glm-5-turbo";
 
   if (!apiKey) {
     return Response.json(
-      { error: "OPENROUTER_API_KEY not configured" },
+      { error: "LLM_API_KEY not configured" },
       { status: 500 }
     );
   }
@@ -30,7 +30,6 @@ export async function POST(req: NextRequest) {
   let contextBlock = "";
 
   if (highlight) {
-    // User selected specific text — emphasize it
     contextBlock = `사용자가 녹음에서 특정 부분을 드래그해서 강조했어. 이 부분에 대해 물어보는 거니까 이 부분을 우선적으로 참고해서 답해.
 
 === 사용자가 강조한 부분 ===
@@ -42,7 +41,6 @@ ${highlight}
 ${transcription || "(녹음 없음)"}
 === 녹음 끝 ===`;
   } else {
-    // No selection — incremental context as before
     contextBlock = `아래는 이전 질문 이후 새로 녹음된 내용이야. 이전 대화 히스토리와 합쳐서 전체 맥락을 파악해.
 새로 녹음된 내용이 없으면 이전 대화 맥락만으로 답해.
 
@@ -65,13 +63,11 @@ ${contextBlock}
     ...messages,
   ];
 
-  const response = await fetch(OPENROUTER_API_URL, {
+  const response = await fetch(`${API_URL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": req.headers.get("origin") || "https://stt-demo.web.app",
-      "X-Title": "STT Chat Agent",
     },
     body: JSON.stringify({
       model,
@@ -83,7 +79,7 @@ ${contextBlock}
   if (!response.ok) {
     const errorText = await response.text();
     return Response.json(
-      { error: `OpenRouter API error: ${response.status}`, details: errorText },
+      { error: `LLM API error: ${response.status}`, details: errorText },
       { status: response.status }
     );
   }
