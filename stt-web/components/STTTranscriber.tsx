@@ -3,7 +3,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useSTTStream } from "@/hooks/useSTTStream";
 import { useFormattingLayer } from "@/hooks/useFormattingLayer";
+import { useNodeMap } from "@/hooks/useNodeMap";
 import ChatPanel from "./ChatPanel";
+import NodeMapView from "./NodeMapView";
 
 interface TextFile { name: string; chars: number; }
 type TabType = "raw" | "formatted";
@@ -19,14 +21,21 @@ export default function STTTranscriber() {
   const [selectedFile, setSelectedFile] = useState("인공지능.txt");
   const [speed, setSpeed] = useState(1);
   const [highlight, setHighlight] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>("raw");
-
   const displayRef = useRef<HTMLDivElement>(null);
   const formattedRef = useRef<HTMLDivElement>(null);
 
   const {
     formattedText, isFormatting, processedChars, totalChars, formatError,
   } = useFormattingLayer(finalText);
+
+  const [activeTab, setActiveTab] = useState<TabType>("raw");
+  const [showNodeMap, setShowNodeMap] = useState(false);
+
+  const {
+    status: nodeMapStatus, progress: nodeMapProgress,
+    nodes: nodeMapNodes, edges: nodeMapEdges,
+    error: nodeMapError, generate: generateNodeMap, reset: resetNodeMap,
+  } = useNodeMap(formattedText || finalText);
 
   useEffect(() => {
     const handleSelection = () => {
@@ -76,6 +85,66 @@ export default function STTTranscriber() {
 
   return (
     <>
+      {/* Node Map View */}
+      {showNodeMap && nodeMapStatus === "done" && (
+        <NodeMapView
+          nodes={nodeMapNodes}
+          edges={nodeMapEdges}
+          onBack={() => { setShowNodeMap(false); resetNodeMap(); }}
+        />
+      )}
+
+      {/* Node Map Loading Overlay */}
+      {showNodeMap && nodeMapStatus !== "done" && nodeMapStatus !== "idle" && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 50,
+          background: "white", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: "1rem",
+        }}>
+          {nodeMapStatus === "error" ? (
+            <>
+              <span style={{ fontSize: "2rem" }}>⚠️</span>
+              <p style={{ margin: 0, fontSize: "0.9375rem", color: "#18181b", fontWeight: 600 }}>
+                노드맵 생성 실패
+              </p>
+              <p style={{ margin: 0, fontSize: "0.8125rem", color: "#71717a" }}>
+                {nodeMapError}
+              </p>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button onClick={() => generateNodeMap()} style={{
+                  borderRadius: "0.375rem", padding: "0.375rem 1rem", fontSize: "0.8125rem",
+                  fontWeight: 600, color: "white", border: "none", cursor: "pointer", background: "#6366f1",
+                }}>재시도</button>
+                <button onClick={() => { setShowNodeMap(false); resetNodeMap(); }} style={{
+                  borderRadius: "0.375rem", padding: "0.375rem 1rem", fontSize: "0.8125rem",
+                  fontWeight: 600, color: "#18181b", border: "1px solid #e4e4e7", cursor: "pointer", background: "white",
+                }}>돌아가기</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{
+                width: "48px", height: "48px", borderRadius: "50%", border: "3px solid #e4e4e7",
+                borderTopColor: "#6366f1", animation: "spin 0.8s linear infinite",
+              }} />
+              <p style={{ margin: 0, fontSize: "1rem", fontWeight: 600, color: "#18181b" }}>
+                🕸️ 지식 노드 맵 생성 중
+              </p>
+              <p style={{ margin: 0, fontSize: "0.8125rem", color: "#71717a" }}>
+                {nodeMapProgress || "처리 중..."}
+              </p>
+              <p style={{ margin: 0, fontSize: "0.6875rem", color: "#a1a1aa" }}>
+                LLM이 트랜스크립트를 분석하여 개념과 관계를 추출합니다
+              </p>
+              <button onClick={() => { setShowNodeMap(false); resetNodeMap(); }} style={{
+                marginTop: "1rem", borderRadius: "0.375rem", padding: "0.375rem 1rem", fontSize: "0.8125rem",
+                fontWeight: 600, color: "#71717a", border: "1px solid #e4e4e7", cursor: "pointer", background: "white",
+              }}>취소</button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Top bar */}
       <div style={{
         flexShrink: 0, display: "flex", alignItems: "center", gap: "0.75rem",
@@ -113,6 +182,22 @@ export default function STTTranscriber() {
         >
           {isListening ? "⏹ 중지" : "▶ 시작"}
         </button>
+
+        {!isListening && (formattedText || finalText).length > 200 && (
+          <button
+            onClick={() => {
+              setShowNodeMap(true);
+              generateNodeMap();
+            }}
+            style={{
+              borderRadius: "0.375rem", padding: "0.375rem 1rem", fontSize: "0.8125rem", fontWeight: 600,
+              color: "white", border: "none", cursor: "pointer",
+              background: "#6366f1",
+            }}
+          >
+            🕸️ 노드맵
+          </button>
+        )}
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "1rem", fontSize: "0.6875rem", color: "#a1a1aa" }}>
           <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
@@ -288,6 +373,7 @@ export default function STTTranscriber() {
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </>
   );
