@@ -2,9 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSTTStream } from "@/hooks/useSTTStream";
+import { useFormattingLayer } from "@/hooks/useFormattingLayer";
 import ChatPanel from "./ChatPanel";
 
 interface TextFile { name: string; chars: number; }
+type TabType = "raw" | "formatted";
 
 export default function STTTranscriber() {
   const {
@@ -17,8 +19,14 @@ export default function STTTranscriber() {
   const [selectedFile, setSelectedFile] = useState("인공지능.txt");
   const [speed, setSpeed] = useState(1);
   const [highlight, setHighlight] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>("raw");
 
   const displayRef = useRef<HTMLDivElement>(null);
+  const formattedRef = useRef<HTMLDivElement>(null);
+
+  const {
+    formattedText, isFormatting, processedChars, totalChars, formatError,
+  } = useFormattingLayer(finalText);
 
   useEffect(() => {
     const handleSelection = () => {
@@ -61,6 +69,10 @@ export default function STTTranscriber() {
   useEffect(() => {
     if (displayRef.current) displayRef.current.scrollTop = displayRef.current.scrollHeight;
   }, [displayText]);
+
+  useEffect(() => {
+    if (formattedRef.current) formattedRef.current.scrollTop = formattedRef.current.scrollHeight;
+  }, [formattedText]);
 
   return (
     <>
@@ -157,30 +169,114 @@ export default function STTTranscriber() {
             </div>
           )}
 
-          <div
-            ref={displayRef}
-            style={{
-              flex: 1, overflowY: "auto", padding: "1.25rem",
-              fontSize: "0.9375rem", lineHeight: 1.8, whiteSpace: "pre-wrap", fontFamily: "inherit",
-              userSelect: "text",
-            }}
-          >
-            {displayText ? (
-              <>
-                <span style={{ color: "#18181b" }}>{finalText}</span>
-                {interimText && (
-                  <span style={{ color: "#6366f1" }}>
-                    {interimText}
-                    <span style={{ animation: "blink 0.8s step-end infinite" }}>▎</span>
-                  </span>
-                )}
-              </>
-            ) : (
-              <span style={{ color: "#a1a1aa" }}>
-                {isListening ? "수신 대기 중..." : "시작 버튼을 눌러 transcription을 시작하세요"}
+          {/* Tabs */}
+          <div style={{
+            flexShrink: 0, display: "flex", borderBottom: "1px solid #e4e4e7", background: "#fafafa",
+          }}>
+            <button
+              onClick={() => setActiveTab("raw")}
+              style={{
+                padding: "0.5rem 1rem", fontSize: "0.8125rem", fontWeight: 600,
+                color: activeTab === "raw" ? "#18181b" : "#71717a",
+                background: "none", border: "none", borderBottom: activeTab === "raw" ? "2px solid #3b82f6" : "2px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              원본
+            </button>
+            <button
+              onClick={() => setActiveTab("formatted")}
+              style={{
+                padding: "0.5rem 1rem", fontSize: "0.8125rem", fontWeight: 600,
+                color: activeTab === "formatted" ? "#18181b" : "#71717a",
+                background: "none", border: "none", borderBottom: activeTab === "formatted" ? "2px solid #10b981" : "2px solid transparent",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", gap: "0.375rem",
+              }}
+            >
+              개선
+              {isFormatting && (
+                <span style={{
+                  width: "0.5rem", height: "0.5rem", borderRadius: "50%", background: "#10b981",
+                  animation: "pulse 1s infinite",
+                }} />
+              )}
+            </button>
+            {activeTab === "formatted" && formattedText.length > 0 && (
+              <span style={{
+                marginLeft: "auto", padding: "0.5rem 1rem", fontSize: "0.6875rem", color: "#a1a1aa",
+                display: "flex", alignItems: "center", gap: "0.375rem",
+              }}>
+                {totalChars > 0 ? `${Math.round((processedChars / totalChars) * 100)}%` : ""}
+                {isFormatting && " 포매팅 중..."}
               </span>
             )}
           </div>
+
+          {/* Format error */}
+          {formatError && activeTab === "formatted" && (
+            <div style={{
+              flexShrink: 0, padding: "0.25rem 0.75rem", background: "#fffbeb",
+              borderBottom: "1px solid #fde68a", fontSize: "0.6875rem", color: "#92400e",
+            }}>
+              ⚠ 포매팅 오류 — 원본 텍스트로 대체됨: {formatError}
+            </div>
+          )}
+
+          {/* Raw transcript view */}
+          {activeTab === "raw" && (
+            <div
+              ref={displayRef}
+              style={{
+                flex: 1, overflowY: "auto", padding: "1.25rem",
+                fontSize: "0.9375rem", lineHeight: 1.8, whiteSpace: "pre-wrap", fontFamily: "inherit",
+                userSelect: "text",
+              }}
+            >
+              {displayText ? (
+                <>
+                  <span style={{ color: "#18181b" }}>{finalText}</span>
+                  {interimText && (
+                    <span style={{ color: "#6366f1" }}>
+                      {interimText}
+                      <span style={{ animation: "blink 0.8s step-end infinite" }}>▎</span>
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span style={{ color: "#a1a1aa" }}>
+                  {isListening ? "수신 대기 중..." : "시작 버튼을 눌러 transcription을 시작하세요"}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Formatted transcript view */}
+          {activeTab === "formatted" && (
+            <div
+              ref={formattedRef}
+              style={{
+                flex: 1, overflowY: "auto", padding: "1.25rem",
+                fontSize: "0.9375rem", lineHeight: 1.9, whiteSpace: "pre-wrap", fontFamily: "inherit",
+                userSelect: "text", color: "#18181b",
+              }}
+            >
+              {formattedText ? (
+                formattedText
+              ) : isFormatting ? (
+                <span style={{ color: "#a1a1aa" }}>포매팅 처리 중...</span>
+              ) : finalText.length > 0 ? (
+                <span style={{ color: "#a1a1aa" }}>포매팅이 곧 시작됩니다...</span>
+              ) : (
+                <span style={{ color: "#a1a1aa" }}>
+                  {isListening ? "수신 대기 중..." : "시작 버튼을 눌러 transcription을 시작하세요"}
+                </span>
+              )}
+              {isFormatting && formattedText.length > 0 && (
+                <span style={{ animation: "blink 0.8s step-end infinite", color: "#10b981" }}>▎</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: Chat */}
