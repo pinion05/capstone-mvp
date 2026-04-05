@@ -133,16 +133,15 @@ export default function ChatPanel({ transcription, highlight, onHighlightUsed }:
       style={{
         display: "flex",
         flexDirection: "column",
-        borderRadius: "0.75rem",
-        border: "1px solid #e4e4e7",
         overflow: "hidden",
-        height: "24rem",
+        height: "100%",
       }}
     >
       {/* Header */}
       <div
         style={{
-          padding: "0.625rem 1rem",
+          flexShrink: 0,
+          padding: "0.5rem 0.75rem",
           background: "#f4f4f5",
           borderBottom: "1px solid #e4e4e7",
           fontSize: "0.8125rem",
