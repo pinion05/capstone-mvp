@@ -20,18 +20,12 @@ export default function STTTranscriber() {
 
   const displayRef = useRef<HTMLDivElement>(null);
 
-  // Detect text selection in transcript area
   useEffect(() => {
     const handleSelection = () => {
       const sel = window.getSelection();
       const text = sel?.toString().trim();
-      if (text && text.length > 0) {
-        setHighlight(text);
-      } else {
-        setHighlight(null);
-      }
+      setHighlight(text && text.length > 0 ? text : null);
     };
-
     document.addEventListener("mouseup", handleSelection);
     document.addEventListener("touchend", handleSelection);
     return () => {
@@ -45,7 +39,6 @@ export default function STTTranscriber() {
       process.env.NEXT_PUBLIC_STT_WS_URL
         ?.replace("ws://", "http://")
         ?.replace("wss://", "https://") || "http://localhost:8765";
-
     fetch(`${apiUrl}/texts`)
       .then((r) => r.json())
       .then((data) => { if (data.texts) setTextFiles(data.texts); })
@@ -70,39 +63,38 @@ export default function STTTranscriber() {
   }, [displayText]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%", maxWidth: "56rem", margin: "0 auto" }}>
-      {/* Controls */}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "0.75rem", borderRadius: "0.75rem", border: "1px solid #e4e4e7", background: "#fafafa", padding: "1rem" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <label style={{ fontSize: "0.75rem", fontWeight: 500, color: "#71717a" }}>텍스트 파일</label>
-          <select
-            value={selectedFile}
-            onChange={(e) => setSelectedFile(e.target.value)}
-            disabled={isListening}
-            style={{ borderRadius: "0.5rem", border: "1px solid #d4d4d8", background: "white", padding: "0.5rem 0.75rem", fontSize: "0.875rem" }}
-          >
-            {textFiles.map((f) => (
-              <option key={f.name} value={f.name}>
-                {f.name} ({(f.chars / 10000).toFixed(1)}만자)
-              </option>
-            ))}
-          </select>
-        </div>
+    <>
+      {/* Top bar */}
+      <div style={{
+        flexShrink: 0, display: "flex", alignItems: "center", gap: "0.75rem",
+        padding: "0.625rem 1rem", background: "white",
+        borderBottom: "1px solid #e4e4e7",
+      }}>
+        <select
+          value={selectedFile}
+          onChange={(e) => setSelectedFile(e.target.value)}
+          disabled={isListening}
+          style={{ borderRadius: "0.375rem", border: "1px solid #d4d4d8", background: "white", padding: "0.375rem 0.5rem", fontSize: "0.8125rem" }}
+        >
+          {textFiles.map((f) => (
+            <option key={f.name} value={f.name}>{f.name} ({(f.chars / 10000).toFixed(1)}만자)</option>
+          ))}
+        </select>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <label style={{ fontSize: "0.75rem", fontWeight: 500, color: "#71717a" }}>속도: {speed}x</label>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+          <span style={{ fontSize: "0.75rem", color: "#71717a" }}>{speed}x</span>
           <input
             type="range" min={0.1} max={1} step={0.1} value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
             disabled={isListening}
-            style={{ width: "7rem", accentColor: "#3b82f6" }}
+            style={{ width: "5rem", accentColor: "#3b82f6" }}
           />
         </div>
 
         <button
           onClick={isListening ? disconnect : () => connect({ textFile: selectedFile, speed, mode: "simulate" })}
           style={{
-            borderRadius: "0.5rem", padding: "0.5rem 1.5rem", fontSize: "0.875rem", fontWeight: 600,
+            borderRadius: "0.375rem", padding: "0.375rem 1rem", fontSize: "0.8125rem", fontWeight: 600,
             color: "white", border: "none", cursor: "pointer",
             background: isListening ? "#ef4444" : "#3b82f6",
           }}
@@ -110,97 +102,97 @@ export default function STTTranscriber() {
           {isListening ? "⏹ 중지" : "▶ 시작"}
         </button>
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "1.5rem", fontSize: "0.75rem", color: "#71717a" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
-            <span style={{ width: "0.5rem", height: "0.5rem", borderRadius: "50%", background: isListening ? "#22c55e" : "#d4d4d8", animation: isListening ? "pulse 1s infinite" : "none" }} />
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "1rem", fontSize: "0.6875rem", color: "#a1a1aa" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+            <span style={{ width: "0.375rem", height: "0.375rem", borderRadius: "50%", background: isListening ? "#22c55e" : "#d4d4d8", animation: isListening ? "pulse 1s infinite" : "none" }} />
             {isListening ? "수신 중" : "대기"}
           </span>
-          {confidence > 0 && <span>신뢰도: {(confidence * 100).toFixed(1)}%</span>}
-          {segmentCount > 0 && <span>세그먼트: {segmentCount}</span>}
+          {confidence > 0 && <span>신뢰도 {(confidence * 100).toFixed(1)}%</span>}
+          {segmentCount > 0 && <span>세그먼트 {segmentCount}</span>}
+          {finalText.length > 0 && <span>{finalText.length.toLocaleString()}자</span>}
         </div>
       </div>
 
       {/* Progress bar */}
       {progress > 0 && (
-        <div style={{ height: "0.375rem", borderRadius: "9999px", background: "#e4e4e7", overflow: "hidden" }}>
-          <div style={{ height: "100%", borderRadius: "9999px", background: "#3b82f6", transition: "width 0.3s", width: `${Math.min(progress, 100)}%` }} />
+        <div style={{ flexShrink: 0, height: "2px", background: "#e4e4e7" }}>
+          <div style={{ height: "100%", background: "#3b82f6", transition: "width 0.3s", width: `${Math.min(progress, 100)}%` }} />
         </div>
       )}
 
-      {/* Error */}
-      {error && (
-        <div style={{ borderRadius: "0.5rem", border: "1px solid #fca5a5", background: "#fef2f2", padding: "0.75rem", fontSize: "0.875rem", color: "#dc2626" }}>
-          {error}
-        </div>
-      )}
+      {/* Main split area */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-      {/* Highlight indicator */}
-      {highlight && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.5rem",
-          padding: "0.5rem 0.75rem", borderRadius: "0.5rem",
-          background: "#eef2ff", border: "1px solid #c7d2fe",
-          fontSize: "0.8125rem", color: "#4338ca",
-        }}>
-          <span style={{ fontSize: "0.75rem" }}>📌</span>
-          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            &quot;{highlight.slice(0, 80)}{highlight.length > 80 ? "..." : ""}&quot;
-          </span>
-          <span style={{ fontSize: "0.6875rem", color: "#6366f1", fontWeight: 500, whiteSpace: "nowrap" }}>
-            {highlight.length}자 선택됨
-          </span>
-          <button
-            onClick={() => { setHighlight(null); window.getSelection()?.removeAllRanges(); }}
-            style={{ background: "none", border: "none", color: "#6366f1", cursor: "pointer", fontSize: "0.875rem", padding: "0 0.25rem" }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Transcript */}
-      <div style={{ position: "relative" }}>
-        <div
-          ref={displayRef}
-          style={{
-            minHeight: "28rem", maxHeight: "70vh", overflowY: "auto",
-            borderRadius: "0.75rem", border: "1px solid #e4e4e7", background: "white",
-            padding: "1.5rem", fontSize: "1rem", lineHeight: 1.75, whiteSpace: "pre-wrap", fontFamily: "inherit",
-            userSelect: "text",
-          }}
-        >
-          {displayText ? (
-            <>
-              <span style={{ color: "#18181b" }}>{finalText}</span>
-              {interimText && (
-                <span style={{ color: "#6366f1" }}>
-                  {interimText}
-                  <span style={{ animation: "blink 0.8s step-end infinite" }}>▎</span>
-                </span>
-              )}
-            </>
-          ) : (
-            <span style={{ color: "#a1a1aa" }}>
-              {isListening ? "수신 대기 중..." : "시작 버튼을 눌러 transcription을 시작하세요"}
-            </span>
+        {/* Left: Transcript */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", borderRight: "1px solid #e4e4e7", position: "relative" }}>
+          {/* Highlight indicator */}
+          {highlight && (
+            <div style={{
+              flexShrink: 0, display: "flex", alignItems: "center", gap: "0.5rem",
+              padding: "0.375rem 0.75rem", background: "#eef2ff", borderBottom: "1px solid #c7d2fe",
+              fontSize: "0.75rem", color: "#4338ca",
+            }}>
+              <span>📌</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                &quot;{highlight.slice(0, 100)}{highlight.length > 100 ? "..." : ""}&quot;
+              </span>
+              <span style={{ fontSize: "0.625rem", color: "#6366f1", fontWeight: 500, whiteSpace: "nowrap" }}>
+                {highlight.length}자
+              </span>
+              <button
+                onClick={() => { setHighlight(null); window.getSelection()?.removeAllRanges(); }}
+                style={{ background: "none", border: "none", color: "#6366f1", cursor: "pointer", fontSize: "0.75rem", padding: "0 0.125rem" }}
+              >
+                ✕
+              </button>
+            </div>
           )}
+
+          {error && (
+            <div style={{
+              flexShrink: 0, padding: "0.375rem 0.75rem", background: "#fef2f2",
+              borderBottom: "1px solid #fecaca", fontSize: "0.75rem", color: "#dc2626",
+            }}>
+              {error}
+            </div>
+          )}
+
+          <div
+            ref={displayRef}
+            style={{
+              flex: 1, overflowY: "auto", padding: "1.25rem",
+              fontSize: "0.9375rem", lineHeight: 1.8, whiteSpace: "pre-wrap", fontFamily: "inherit",
+              userSelect: "text",
+            }}
+          >
+            {displayText ? (
+              <>
+                <span style={{ color: "#18181b" }}>{finalText}</span>
+                {interimText && (
+                  <span style={{ color: "#6366f1" }}>
+                    {interimText}
+                    <span style={{ animation: "blink 0.8s step-end infinite" }}>▎</span>
+                  </span>
+                )}
+              </>
+            ) : (
+              <span style={{ color: "#a1a1aa" }}>
+                {isListening ? "수신 대기 중..." : "시작 버튼을 눌러 transcription을 시작하세요"}
+              </span>
+            )}
+          </div>
         </div>
 
-        {finalText.length > 0 && (
-          <div style={{ position: "absolute", top: "0.75rem", right: "0.75rem", borderRadius: "9999px", background: "#f4f4f5", padding: "0.125rem 0.625rem", fontSize: "0.75rem", color: "#71717a" }}>
-            {finalText.length.toLocaleString()}자
-          </div>
-        )}
+        {/* Right: Chat */}
+        <div style={{ width: "380px", flexShrink: 0, display: "flex", flexDirection: "column" }}>
+          <ChatPanel transcription={displayText} highlight={highlight} onHighlightUsed={() => setHighlight(null)} />
+        </div>
       </div>
 
-      {/* Chat Agent */}
-      <ChatPanel transcription={displayText} highlight={highlight} onHighlightUsed={() => setHighlight(null)} />
-
-      {/* Inline keyframes */}
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
       `}</style>
-    </div>
+    </>
   );
 }
