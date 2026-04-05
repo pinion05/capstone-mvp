@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 const CHUNK_SIZE = 2000;
+const MIN_BUFFER = 200;
 
 interface FormattingState {
   formattedText: string;
@@ -23,14 +24,19 @@ export function useFormattingLayer(rawText: string) {
     error: null,
   });
 
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const processingRef = useRef(false);
-  const abortRef = useRef(false);
+  // Use refs to avoid dependency cycles
+  const cursorRef = useRef(0);
+  const formattedRef = useRef("");
+  const processedRef = useRef(0);
+  const busyRef = useRef(false);
+  const rawTextRef = useRef(rawText);
+  rawTextRef.current = rawText;
 
   const reset = useCallback(() => {
-    abortRef.current = true;
-    processingRef.current = false;
+    cursorRef.current = 0;
+    formattedRef.current = "";
+    processedRef.current = 0;
+    busyRef.current = false;
     setState({
       formattedText: "",
       cursor: 0,
@@ -41,114 +47,100 @@ export function useFormattingLayer(rawText: string) {
     });
   }, []);
 
-  // Main processing loop
-  const processNextChunk = useCallback(async () => {
-    const current = stateRef.current;
-    const remaining = rawText.slice(current.cursor);
-
-    // Nothing left to process
-    if (remaining.length === 0) {
-      processingRef.current = false;
-      setState((prev) => ({ ...prev, isProcessing: false }));
-      return;
-    }
-
-    // Not enough text to warrant a chunk yet (wait for more streaming)
-    if (remaining.length < 200) {
-      processingRef.current = false;
-      setState((prev) => ({ ...prev, isProcessing: false }));
-      return;
-    }
-
-    const chunk = remaining.slice(0, CHUNK_SIZE);
-
-    setState((prev) => ({
-      ...prev,
-      isProcessing: true,
-      totalChars: rawText.length,
-    }));
+  // Single processing function — no recursion, no state deps
+  const processChunk = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
 
     try {
-      const res = await fetch("/api/format", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: chunk, cursor: current.cursor }),
-      });
+      while (true) {
+        const cursor = cursorRef.current;
+        const remaining = rawTextRef.current.slice(cursor);
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || `HTTP ${res.status}`);
+        // Nothing left or not enough buffer
+        if (remaining.length < MIN_BUFFER) {
+          setState((prev) => ({ ...prev, isProcessing: false }));
+          break;
+        }
+
+        const chunk = remaining.slice(0, CHUNK_SIZE);
+
+        setState((prev) => ({
+          ...prev,
+          isProcessing: true,
+          totalChars: rawTextRef.current.length,
+        }));
+
+        try {
+          const res = await fetch("/api/format", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunk, cursor }),
+          });
+
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || `HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          const newFormatted = data.formatted || chunk;
+          const newCursor = data.new_cursor || cursor + chunk.length;
+          const processed = data.processed_chars || chunk.length;
+
+          cursorRef.current = newCursor;
+          formattedRef.current = formattedRef.current + newFormatted;
+          processedRef.current = processedRef.current + processed;
+
+          setState((prev) => ({
+            ...prev,
+            formattedText: formattedRef.current,
+            cursor: newCursor,
+            processedChars: processedRef.current,
+            totalChars: rawTextRef.current.length,
+          }));
+
+          // Check if there's enough for another chunk
+          const nextRemaining = rawTextRef.current.slice(newCursor);
+          if (nextRemaining.length < MIN_BUFFER) {
+            setState((prev) => ({ ...prev, isProcessing: false }));
+            break;
+          }
+          // Continue loop for next chunk
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          // Skip chunk on error
+          cursorRef.current = cursor + chunk.length;
+          processedRef.current = processedRef.current + chunk.length;
+          formattedRef.current = formattedRef.current + chunk;
+          setState((prev) => ({
+            ...prev,
+            cursor: cursorRef.current,
+            processedChars: processedRef.current,
+            formattedText: formattedRef.current,
+            isProcessing: false,
+            error: message,
+          }));
+          break;
+        }
       }
-
-      const data = await res.json();
-
-      if (abortRef.current) return;
-
-      const newFormatted = data.formatted || chunk;
-      const newCursor = data.new_cursor || current.cursor + chunk.length;
-      const processed = data.processed_chars || chunk.length;
-
-      setState((prev) => ({
-        ...prev,
-        formattedText: prev.formattedText + newFormatted,
-        cursor: newCursor,
-        processedChars: prev.processedChars + processed,
-        isProcessing: true, // stay true, more may come
-        totalChars: rawText.length,
-      }));
-
-      // Check if there's more to process
-      const nextRemaining = rawText.slice(newCursor);
-      if (nextRemaining.length >= 200) {
-        // More chunks to process — continue immediately
-        processNextChunk();
-      } else {
-        processingRef.current = false;
-        setState((prev) => ({ ...prev, isProcessing: false }));
-      }
-    } catch (err) {
-      if (abortRef.current) return;
-      const message = err instanceof Error ? err.message : "Unknown error";
-
-      // On error, skip this chunk and advance cursor
-      setState((prev) => ({
-        ...prev,
-        cursor: prev.cursor + chunk.length,
-        processedChars: prev.processedChars + chunk.length,
-        formattedText: prev.formattedText + chunk,
-        isProcessing: false,
-        error: message,
-      }));
-      processingRef.current = false;
+    } finally {
+      busyRef.current = false;
     }
-  }, [rawText]);
+  }, []); // No dependencies — everything through refs
 
-  // Watch rawText changes — trigger processing when new content arrives
-  const lastProcessedLengthRef = useRef(0);
-
+  // Watch rawText — trigger processing when buffer grows
   useEffect(() => {
     if (rawText.length === 0) {
       reset();
-      lastProcessedLengthRef.current = 0;
       return;
     }
 
-    const current = stateRef.current;
-    const unprocessedLength = rawText.length - current.cursor;
-
-    // If there's enough unprocessed text and we're not already processing
-    if (unprocessedLength >= 200 && !processingRef.current) {
-      processingRef.current = true;
-      processNextChunk();
+    const unprocessed = rawText.length - cursorRef.current;
+    if (unprocessed >= MIN_BUFFER && !busyRef.current) {
+      processChunk();
     }
-  }, [rawText, processNextChunk, reset]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      abortRef.current = true;
-    };
-  }, []);
+  }, [rawText, processChunk, reset]);
 
   return {
     formattedText: state.formattedText,
