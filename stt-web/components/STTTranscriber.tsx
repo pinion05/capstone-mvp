@@ -134,7 +134,7 @@ export default function STTTranscriber() {
             }}>
               <span>📌</span>
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                &quot;{highlight.slice(0, 100)}{highlight.length > 100 ? "..." : ""}&quot;
+                &quot;{highlight.slice(0, 10)}{highlight.length > 10 ? "..." : ""}&quot;
               </span>
               <span style={{ fontSize: "0.625rem", color: "#6366f1", fontWeight: 500, whiteSpace: "nowrap" }}>
                 {highlight.length}자
