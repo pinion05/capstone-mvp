@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 const CHUNK_SIZE = 2000;
 const MIN_BUFFER = 200;
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 2000;
 
 interface FormattingState {
   formattedText: string;
@@ -12,6 +14,10 @@ interface FormattingState {
   processedChars: number;
   totalChars: number;
   error: string | null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function useFormattingLayer(rawText: string) {
@@ -24,7 +30,6 @@ export function useFormattingLayer(rawText: string) {
     error: null,
   });
 
-  // Use refs to avoid dependency cycles
   const cursorRef = useRef(0);
   const formattedRef = useRef("");
   const processedRef = useRef(0);
@@ -47,7 +52,6 @@ export function useFormattingLayer(rawText: string) {
     });
   }, []);
 
-  // Single processing function — no recursion, no state deps
   const processChunk = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -57,7 +61,6 @@ export function useFormattingLayer(rawText: string) {
         const cursor = cursorRef.current;
         const remaining = rawTextRef.current.slice(cursor);
 
-        // Nothing left or not enough buffer
         if (remaining.length < MIN_BUFFER) {
           setState((prev) => ({ ...prev, isProcessing: false }));
           break;
@@ -69,67 +72,96 @@ export function useFormattingLayer(rawText: string) {
           ...prev,
           isProcessing: true,
           totalChars: rawTextRef.current.length,
+          error: null,
         }));
 
-        try {
-          const res = await fetch("/api/format", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: chunk, cursor }),
-          });
-
-          if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || `HTTP ${res.status}`);
+        // Exponential backoff retry
+        let success = false;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+            await sleep(delay);
           }
 
-          const data = await res.json();
-          const newFormatted = data.formatted || chunk;
-          const newCursor = data.new_cursor || cursor + chunk.length;
-          const processed = data.processed_chars || chunk.length;
+          try {
+            const res = await fetch("/api/format", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: chunk, cursor }),
+            });
 
-          cursorRef.current = newCursor;
-          formattedRef.current = formattedRef.current + newFormatted;
-          processedRef.current = processedRef.current + processed;
+            if (!res.ok) {
+              // Retryable errors: 502, 503, 504, 429
+              if ([502, 503, 504, 429].includes(res.status) && attempt < MAX_RETRIES - 1) {
+                continue;
+              }
+              const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+              throw new Error(errData.error || `HTTP ${res.status}`);
+            }
 
-          setState((prev) => ({
-            ...prev,
-            formattedText: formattedRef.current,
-            cursor: newCursor,
-            processedChars: processedRef.current,
-            totalChars: rawTextRef.current.length,
-          }));
+            const data = await res.json();
+            const newFormatted = data.formatted || chunk;
+            const newCursor = data.new_cursor || cursor + chunk.length;
+            const processed = data.processed_chars || chunk.length;
 
-          // Check if there's enough for another chunk
-          const nextRemaining = rawTextRef.current.slice(newCursor);
-          if (nextRemaining.length < MIN_BUFFER) {
-            setState((prev) => ({ ...prev, isProcessing: false }));
+            cursorRef.current = newCursor;
+            formattedRef.current = formattedRef.current + newFormatted;
+            processedRef.current = processedRef.current + processed;
+
+            setState((prev) => ({
+              ...prev,
+              formattedText: formattedRef.current,
+              cursor: newCursor,
+              processedChars: processedRef.current,
+              totalChars: rawTextRef.current.length,
+            }));
+
+            success = true;
+            break;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Unknown error";
+            // Retryable: network errors, timeouts, 502/503/504
+            const isRetryable = message.includes("Failed to fetch") ||
+              message.includes("502") ||
+              message.includes("503") ||
+              message.includes("504") ||
+              message.includes("429") ||
+              message.includes("timeout") ||
+              message.includes("NetworkError");
+
+            if (isRetryable && attempt < MAX_RETRIES - 1) {
+              continue;
+            }
+
+            // Non-retryable or max retries exceeded — skip chunk
+            cursorRef.current = cursor + chunk.length;
+            processedRef.current = processedRef.current + chunk.length;
+            formattedRef.current = formattedRef.current + chunk;
+            setState((prev) => ({
+              ...prev,
+              cursor: cursorRef.current,
+              processedChars: processedRef.current,
+              formattedText: formattedRef.current,
+              isProcessing: false,
+              error: attempt >= MAX_RETRIES - 1 ? `${message} (${MAX_RETRIES}회 재시도 실패)` : message,
+            }));
             break;
           }
-          // Continue loop for next chunk
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Unknown error";
-          // Skip chunk on error
-          cursorRef.current = cursor + chunk.length;
-          processedRef.current = processedRef.current + chunk.length;
-          formattedRef.current = formattedRef.current + chunk;
-          setState((prev) => ({
-            ...prev,
-            cursor: cursorRef.current,
-            processedChars: processedRef.current,
-            formattedText: formattedRef.current,
-            isProcessing: false,
-            error: message,
-          }));
+        }
+
+        if (!success) break;
+
+        const nextRemaining = rawTextRef.current.slice(cursorRef.current);
+        if (nextRemaining.length < MIN_BUFFER) {
+          setState((prev) => ({ ...prev, isProcessing: false }));
           break;
         }
       }
     } finally {
       busyRef.current = false;
     }
-  }, []); // No dependencies — everything through refs
+  }, []);
 
-  // Watch rawText — trigger processing when buffer grows
   useEffect(() => {
     if (rawText.length === 0) {
       reset();
